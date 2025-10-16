@@ -1,0 +1,841 @@
+(() => {
+  // ===== Universal Save Editor — v1.4.0 (Replace All + QoL) =====
+  // Paste in console. Adds:
+  // - Replace All (Editor JSON): regex or plain; scope: keys / values / both; preview & count.
+  // - Replace All (Storage JSON editor): same as above.
+  // - Quick “Jump to path” in Editor.
+  // - Copy path buttons in trees.
+  // Everything else kept from 1.3.5.
+
+  try { if (window.__USE && window.__USE.destroy) window.__USE.destroy(); } catch {}
+
+  const NS='__USE_TABS__', WIN_NS=NS+'_WIN', SESS_NS=NS+'_SESS', WB_NS=SESS_NS+'_WB', SNAPS_NS=SESS_NS+'_SNAPS';
+
+  // ---------- Root ----------
+  const root=document.createElement('div');
+  Object.assign(root.style,{
+    all:'initial', position:'fixed', zIndex:2147483647,
+    left:'16px', top:'16px', width:'90vw', height:'80vh',
+    maxWidth:'96vw', maxHeight:'92vh', overflow:'auto',
+    fontFamily:'ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial', color:'#e7e9f3'
+  });
+  try{ const w=JSON.parse(localStorage.getItem(WIN_NS)||'null'); if(w){ ['left','top','width','height'].forEach(k=>w[k]&&(root.style[k]=w[k])); } }catch{}
+  document.body.appendChild(root);
+
+  // ---------- Styles ----------
+  const style=document.createElement('style'); style.textContent=`
+.use-wrap{min-width:640px;min-height:420px;background:#0c1020;border:1px solid #2a315a;border-radius:14px;box-shadow:0 8px 32px rgba(0,0,0,.45);display:flex;flex-direction:column;overflow:hidden;position:relative}
+.use-header{display:flex;gap:8px;align-items:center;padding:8px 10px;background:#141935;border-bottom:1px solid #2a315a;cursor:move}
+.use-brand{font-weight:800}
+.use-chip{border:1px solid #2a315a;color:#a8aecd;background:#161a2e;padding:4px 8px;border-radius:10px}
+.use-btn{background:#1d2240;border:1px solid #2a315a;color:#e7e9f3;padding:6px 10px;border-radius:9px;cursor:pointer}
+.use-btn:hover{border-color:#7aa2ff}
+.use-btn.danger{background:#642828;border-color:#7d3030}
+.use-btn.ghost{background:transparent}
+.use-tabs{display:flex;gap:6px;align-items:center;padding:6px 8px;background:#10142b;border-bottom:1px solid #2a315a;flex-wrap:wrap}
+.use-tab{border:1px solid #2a315a;background:#151a33;color:#cfd7ff;padding:5px 9px;border-radius:8px;cursor:pointer;user-select:none}
+.use-tab.active{background:#223060;border-color:#4152a3}
+.use-tabspacer{flex:1}
+.use-stepper{display:flex;gap:6px;align-items:center}
+.use-main{flex:1 1 auto;display:flex;overflow:hidden}
+.use-view{display:none;flex:1 1 auto;min-width:0;min-height:0}
+.use-view.active{display:flex}
+.use-col{flex:1 1 auto;display:flex;flex-direction:column;min-width:0;min-height:0}
+.use-section{background:#141a33;display:flex;flex-direction:column;border-top:1px solid #2a315a;min-height:0}
+.use-ph{padding:8px 10px;background:#1a2347;border-bottom:1px solid #2a315a;font-weight:600;position:sticky;top:0;z-index:1}
+.use-pb{padding:10px;display:grid;gap:8px;flex:1 1 auto;overflow:auto;min-width:0;min-height:0;overscroll-behavior:contain}
+.use-item{border:1px solid #2a315a;background:#0e1328;border-radius:10px;padding:8px;display:grid;gap:6px}
+.use-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.use-row>*{min-width:0;flex:1 1 auto}
+.use-row-tight{display:flex;gap:6px;align-items:center}
+.use-small{font-size:12px;color:#a8aecd}
+.use-badge{border:1px solid #2a315a;color:#a8aecd;border-radius:8px;padding:2px 6px;font-size:11px}
+.use-pill{padding:4px 8px;border:1px solid #2a315a;border-radius:999px;background:#0f1633;color:#dbe1ff;font-size:12px;display:inline-flex;gap:6px;align-items:center}
+.use-input,.use-textarea,.use-select{width:100%;max-width:100%;background:#0f142b;color:#e7e9f3;border:1px solid #2a315a;border-radius:9px;padding:7px}
+.use-input{white-space:nowrap;overflow-x:auto}
+.use-textarea{min-height:110px;max-height:58vh;overflow:auto;resize:vertical}
+.use-log{white-space:pre;overflow:auto;max-height:58vh;background:#0a0d1d;border:1px solid #2a315a;border-radius:9px;padding:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+.use-tree{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;display:grid;gap:4px;max-height:58vh;overflow:auto}
+.use-kv{display:grid;grid-template-columns:minmax(180px,auto) 1fr auto auto;gap:6px;align-items:center}
+.use-k{color:#cbd5ff;overflow:hidden;text-overflow:ellipsis}
+.use-pathbtn{font-size:11px;opacity:.85;cursor:pointer;border:1px solid #2a315a;border-radius:6px;padding:2px 6px;background:#0f1633}
+.use-v input{width:100%}
+.use-list{display:grid;gap:4px}
+.use-kstatus{font-size:11px;opacity:.85}
+.use-res-e{position:absolute;top:0;right:-3px;width:6px;height:100%;cursor:ew-resize}
+.use-res-s{position:absolute;left:0;bottom:-3px;width:100%;height:6px;cursor:ns-resize}
+.use-res-se{position:absolute;right:-4px;bottom:-4px;width:12px;height:12px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 0 40%,#2a315a 40% 60%,transparent 60% 100%);border-radius:3px}
+.use-toast{position:sticky;left:calc(100% - 120px);bottom:8px;background:#10183a;border:1px solid #2a315a;border-radius:10px;padding:6px 10px;font-size:12px;opacity:0;transition:opacity .15s}
+.use-toast.show{opacity:1}
+.fit-note{position:sticky;bottom:0;right:0;margin-left:auto;color:#a8aecd;font-size:11px;padding:4px 8px}
+  `;
+  root.appendChild(style);
+
+  // ---------- HTML ----------
+  const el = (html) => { const d=document.createElement('div'); d.innerHTML=html.trim(); return d.firstElementChild; };
+  const app = el(`
+<div class="use-wrap" id="use-wrap">
+  <div class="use-header" id="use-drag">
+    <div style="flex:1;display:flex;gap:8px;align-items:center;min-width:0">
+      <div class="use-brand">Universal Save Editor</div>
+      <div class="use-chip" id="use-status">Ready</div>
+      <span class="use-badge" id="use-kind">—</span>
+    </div>
+    <button class="use-btn ghost" id="use-fit">Fit</button>
+    <button class="use-btn ghost" id="use-zoom">Zoom+</button>
+    <button class="use-btn" id="use-undo">Undo</button>
+    <button class="use-btn" id="use-redo">Redo</button>
+    <button class="use-btn" id="use-min">Min</button>
+    <button class="use-btn danger" id="use-close">Close</button>
+  </div>
+
+  <div class="use-tabs" id="use-tabs">
+    <div class="use-tab active" data-tab="sources">1. Sources</div>
+    <div class="use-tab" data-tab="editor">2. Editor</div>
+    <div class="use-tab" data-tab="storage">3. Storage</div>
+    <div class="use-tab" data-tab="history">4. History</div>
+    <div class="use-tab" data-tab="export">5. Export</div>
+    <div class="use-tabspacer"></div>
+    <div class="use-stepper">
+      <button class="use-btn" id="use-prev">Back</button>
+      <button class="use-btn" id="use-next">Next</button>
+    </div>
+    <div class="use-small" id="use-step">Step 1/5</div>
+  </div>
+
+  <div class="use-main">
+    <!-- SOURCES -->
+    <div class="use-view active" data-view="sources">
+      <div class="use-col">
+        <div class="use-section"><div class="use-ph">Load</div>
+          <div class="use-pb">
+            <div class="use-item">
+              <div class="use-row">
+                <input class="use-input" type="file" id="use-file">
+                <button class="use-btn" id="use-load-file">Load</button>
+              </div>
+              <div class="use-small">Accepts JSON, base64(JSON), or raw text.</div>
+            </div>
+            <div class="use-item">
+              <div class="use-row">
+                <input class="use-input" id="use-url" placeholder="https://example.com/save.json" spellcheck="false">
+                <button class="use-btn" id="use-fetch">Fetch URL</button>
+              </div>
+              <div class="use-small">CORS must allow it.</div>
+            </div>
+            <div class="use-item">
+              <textarea class="use-textarea" id="use-paste" placeholder="Paste raw save text..." spellcheck="false"></textarea>
+              <div class="use-row">
+                <button class="use-btn" id="use-parse">Parse</button>
+                <button class="use-btn" id="use-as-text">Treat as Text</button>
+              </div>
+            </div>
+            <div class="fit-note">If anything clips, press “Fit”. Root is scrollable.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- EDITOR -->
+    <div class="use-view" data-view="editor">
+      <div class="use-col">
+
+        <!-- Replace All (Editor JSON) -->
+        <div class="use-section"><div class="use-ph">Replace All (Editor JSON)</div>
+          <div class="use-pb">
+            <div class="use-item">
+              <div class="use-row">
+                <input class="use-input" id="repl-find" placeholder="Find (text or regex)" spellcheck="false">
+                <input class="use-input" id="repl-repl" placeholder="Replace with" spellcheck="false">
+              </div>
+              <div class="use-row">
+                <select class="use-select" id="repl-scope">
+                  <option value="both">keys + values</option>
+                  <option value="keys">keys only</option>
+                  <option value="values">values only</option>
+                </select>
+                <label class="use-row" style="gap:6px;width:auto"><input type="checkbox" id="repl-regex"> regex</label>
+                <label class="use-row" style="gap:6px;width:auto"><input type="checkbox" id="repl-case"> case sensitive</label>
+                <button class="use-btn" id="repl-preview">Preview</button>
+                <button class="use-btn" id="repl-run">Run</button>
+                <span class="use-kstatus" id="repl-count">—</span>
+              </div>
+            </div>
+            <div class="use-log" id="repl-log"></div>
+          </div>
+        </div>
+
+        <div class="use-section"><div class="use-ph">Search / Jump / Replace (single)</div>
+          <div class="use-pb">
+            <div class="use-row">
+              <input class="use-input" id="use-q" placeholder="Search keys/values (regex ok)" spellcheck="false">
+              <button class="use-btn" id="use-search">Search</button>
+              <button class="use-btn" id="use-replace">Replace…</button>
+              <input class="use-input" id="use-jump" placeholder="Jump to path (e.g. player.stats.hp)" spellcheck="false">
+              <button class="use-btn" id="use-jump-go">Go</button>
+            </div>
+            <div class="use-log" id="use-search-out"></div>
+          </div>
+        </div>
+
+        <div class="use-section"><div class="use-ph">Mutate</div>
+          <div class="use-pb">
+            <div class="use-item">
+              <div class="use-row">
+                <span class="use-badge">Set path</span>
+                <input class="use-input" id="use-path-key" placeholder="player.stats.hp" spellcheck="false">
+                <input class="use-input" id="use-path-val" placeholder="100" spellcheck="false">
+                <button class="use-btn" id="use-set-path">Set</button>
+              </div>
+              <div class="use-row">
+                <span class="use-badge">Delete path</span>
+                <input class="use-input" id="use-path-del" placeholder="inventory.items[3]" spellcheck="false">
+                <button class="use-btn danger" id="use-del-path">Delete</button>
+              </div>
+            </div>
+            <div class="use-item">
+              <div class="use-row"><span class="use-badge">Coerce "123"→123</span><button class="use-btn" id="use-coerce">Run</button></div>
+              <div class="use-row"><span class="use-badge">Clamp</span><input class="use-input" id="use-cmin" type="number" placeholder="min" style="max-width:120px"><input class="use-input" id="use-cmax" type="number" placeholder="max" style="max-width:120px"><button class="use-btn" id="use-clamp">Clamp</button></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="use-section"><div class="use-ph">Raw</div>
+          <div class="use-pb">
+            <div class="use-item">
+              <div class="use-row">
+                <span class="use-badge">Raw JSON</span>
+                <button class="use-btn" id="use-apply-raw">Apply</button>
+                <button class="use-btn ghost" id="use-pretty">Pretty</button>
+                <span class="use-kstatus" id="use-json-status"></span>
+              </div>
+              <textarea class="use-textarea" id="use-raw" spellcheck="false"></textarea>
+            </div>
+            <div class="use-item">
+              <div class="use-row"><span class="use-badge">Raw Text / Hex</span><button class="use-btn" id="use-apply-text">Apply</button></div>
+              <textarea class="use-textarea" id="use-raw-text" spellcheck="false"></textarea>
+            </div>
+          </div>
+        </div>
+
+        <div class="use-section"><div class="use-ph">Tree</div>
+          <div class="use-pb">
+            <div class="use-item"><div class="use-tree" id="use-tree"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STORAGE -->
+    <div class="use-view" data-view="storage">
+      <div class="use-col">
+        <div class="use-section"><div class="use-ph">Browse</div>
+          <div class="use-pb">
+            <div class="use-item">
+              <div class="use-row">
+                <select class="use-select" id="use-sto-which"><option value="local">localStorage</option><option value="session">sessionStorage</option></select>
+                <input class="use-input" id="use-sto-filter" placeholder="filter keys (regex ok)" spellcheck="false">
+                <button class="use-btn" id="use-sto-scan">Scan</button>
+              </div>
+              <div class="use-list" id="use-sto-list"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="use-section"><div class="use-ph">Selected key</div>
+          <div class="use-pb">
+            <div class="use-item">
+              <div class="use-row-tight" style="gap:8px">
+                <span class="use-badge">Key</span>
+                <input class="use-input" id="use-sto-key" placeholder="my_key" spellcheck="false">
+                <span class="use-badge">Format</span>
+                <select class="use-select" id="use-sto-fmt"><option value="auto">auto-detect</option><option value="json">JSON</option><option value="base64json">base64(JSON)</option><option value="text">raw text</option></select>
+                <span class="use-kstatus" id="use-sto-detected">detected: —</span>
+              </div>
+              <div class="use-row-tight">
+                <button class="use-btn" id="use-sto-load">Load</button>
+                <button class="use-btn" id="use-sto-save">Save</button>
+                <button class="use-btn danger" id="use-sto-del">Delete</button>
+              </div>
+            </div>
+
+            <!-- JSON Value Editor -->
+            <div class="use-item" id="use-sto-json-wrap" style="display:none">
+              <div class="use-row">
+                <span class="use-badge">JSON Value</span>
+                <button class="use-btn" id="use-sto-json-apply">Apply to Storage</button>
+                <span class="use-small" id="use-sto-json-status">—</span>
+              </div>
+              <textarea class="use-textarea" id="use-sto-json-raw" spellcheck="false" placeholder="JSON will appear here after Load"></textarea>
+
+              <!-- Replace All for Storage JSON -->
+              <div class="use-item">
+                <div class="use-row">
+                  <input class="use-input" id="srepl-find" placeholder="Find (text or regex)" spellcheck="false">
+                  <input class="use-input" id="srepl-repl" placeholder="Replace with" spellcheck="false">
+                </div>
+                <div class="use-row">
+                  <select class="use-select" id="srepl-scope">
+                    <option value="both">keys + values</option>
+                    <option value="keys">keys only</option>
+                    <option value="values">values only</option>
+                  </select>
+                  <label class="use-row" style="gap:6px;width:auto"><input type="checkbox" id="srepl-regex"> regex</label>
+                  <label class="use-row" style="gap:6px;width:auto"><input type="checkbox" id="srepl-case"> case sensitive</label>
+                  <button class="use-btn" id="srepl-preview">Preview</button>
+                  <button class="use-btn" id="srepl-run">Run</button>
+                  <span class="use-kstatus" id="srepl-count">—</span>
+                </div>
+                <div class="use-log" id="srepl-log"></div>
+              </div>
+
+              <div class="use-small">Inline edit tree:</div>
+              <div class="use-tree" id="use-sto-json-tree"></div>
+            </div>
+
+            <!-- Raw (non-JSON) -->
+            <div class="use-item" id="use-sto-text-wrap">
+              <div class="use-row"><span class="use-badge">Raw Value (editable)</span></div>
+              <textarea class="use-textarea" id="use-sto-val" spellcheck="false" placeholder="Value will appear here after Load..."></textarea>
+            </div>
+
+            <div class="use-item">
+              <div class="use-row"><button class="use-btn" id="use-sto-to-editor-json">Load into Editor as JSON</button><button class="use-btn" id="use-sto-to-editor-text">Load into Editor as Text</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- HISTORY -->
+    <div class="use-view" data-view="history">
+      <div class="use-col">
+        <div class="use-section"><div class="use-ph">Snapshots / Diff</div>
+          <div class="use-pb">
+            <div class="use-item">
+              <div class="use-row"><button class="use-btn" id="use-snap">Snapshot</button><select class="use-select" id="use-snap-sel"></select><button class="use-btn" id="use-revert">Revert</button></div>
+              <div class="use-row"><select class="use-select" id="use-diff-a"></select><select class="use-select" id="use-diff-b"></select><button class="use-btn" id="use-diff">Diff</button></div>
+              <div class="use-log" id="use-diff-out"></div>
+            </div>
+            <div class="use-item"><div class="use-log" id="use-hist"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- EXPORT -->
+    <div class="use-view" data-view="export">
+      <div class="use-col">
+        <div class="use-section"><div class="use-ph">Write-back (auto-save / refresh)</div>
+          <div class="use-pb">
+            <div class="use-item">
+              <div class="use-row">
+                <span class="use-badge">Target</span>
+                <select class="use-select" id="use-wb-store" style="max-width:160px"><option value="local">localStorage</option><option value="session">sessionStorage</option></select>
+                <input class="use-input" id="use-wb-key" placeholder="key (e.g. game_save)" spellcheck="false">
+              </div>
+              <div class="use-row">
+                <select class="use-select" id="use-wb-fmt"><option value="json">JSON</option><option value="base64json">base64(JSON)</option><option value="text">raw text</option></select>
+                <label class="use-row" style="gap:6px;width:auto"><input type="checkbox" id="use-wb-auto"> Auto-save</label>
+                <label class="use-row" style="gap:6px;width:auto"><input type="checkbox" id="use-wb-autoref"> Auto-refresh</label>
+                <input class="use-input" id="use-iframe" placeholder="iframe CSS selector (optional)" spellcheck="false">
+              </div>
+              <div class="use-row"><button class="use-btn" id="use-save-now" title="Ctrl/Cmd+Enter">Save Now</button><button class="use-btn" id="use-save-refresh">Save & Refresh</button><button class="use-btn" id="use-load-from-key">Load from key</button></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="use-section"><div class="use-ph">Export file</div>
+          <div class="use-pb">
+            <div class="use-item">
+              <div class="use-row"><input class="use-input" id="use-out-name" placeholder="save.json"><select class="use-select" id="use-out-fmt"><option value="json">JSON (pretty)</option><option value="json-min">JSON (minified)</option><option value="text">Raw Text</option></select><button class="use-btn" id="use-download">Download</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="use-res-e" id="use-rz-e"></div>
+  <div class="use-res-s" id="use-rz-s"></div>
+  <div class="use-res-se" id="use-rz-se"></div>
+  <div class="use-toast" id="use-toast">Saved</div>
+</div>`);
+  root.appendChild(app);
+
+  // ---------- Refs / State ----------
+  const $=id=>document.getElementById(id);
+  const ui={
+    status:$('use-status'), kind:$('use-kind'), raw:$('use-raw'), rawText:$('use-raw-text'),
+    tree:$('use-tree'), hist:$('use-hist'), searchOut:$('use-search-out'),
+    diffOut:$('use-diff-out'), toast:$('use-toast'), jsonStatus:$('use-json-status'),
+    step:$('use-step'), det:$('use-sto-detected'),
+
+    // Replace All (Editor):
+    rFind:$('repl-find'), rRepl:$('repl-repl'), rScope:$('repl-scope'),
+    rRegex:$('repl-regex'), rCase:$('repl-case'),
+    rPrev:$('repl-preview'), rRun:$('repl-run'), rCount:$('repl-count'), rLog:$('repl-log'),
+
+    // Jump:
+    jump:$('use-jump'),
+
+    // Storage:
+    stoList:$('use-sto-list'), stoKey:$('use-sto-key'), stoFmt:$('use-sto-fmt'), stoVal:$('use-sto-val'),
+    stoWhich:$('use-sto-which'), stoFilter:$('use-sto-filter'),
+    stoTextWrap:$('use-sto-text-wrap'), stoJSONWrap:$('use-sto-json-wrap'),
+    stoJSONRaw:$('use-sto-json-raw'), stoJSONTree:$('use-sto-json-tree'), stoJSONStatus:$('use-sto-json-status'),
+
+    // Storage Replace All:
+    srFind:$('srepl-find'), srRepl:$('srepl-repl'), srScope:$('srepl-scope'),
+    srRegex:$('srepl-regex'), srCase:$('srepl-case'),
+    srPrev:$('srepl-preview'), srRun:$('srepl-run'), srCount:$('srepl-count'), srLog:$('srepl-log')
+  };
+  const state={
+    filename:null,kind:'none',data:null,rawText:'',
+    history:[],_undo:[],_redo:[],
+    snaps:[],snapId:0,
+    writeback:{store:'local',key:'',fmt:'json',auto:false,autoRefresh:false,iframeSel:''},
+    stoParsed:null
+  };
+  const TABS=['sources','editor','storage','history','export']; let activeIdx=0;
+
+  // ---------- Utils ----------
+  const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+  function saveWin(){ try{ const r=root.getBoundingClientRect(); localStorage.setItem(WIN_NS, JSON.stringify({left:root.style.left||r.left+'px', top:root.style.top||r.top+'px', width:root.style.width||r.width+'px', height:root.style.height||r.height+'px'})); }catch{} }
+  function clampIntoViewport(){ const r=root.getBoundingClientRect(),vw=window.innerWidth,vh=window.innerHeight; root.style.left=clamp(r.left,8,Math.max(8,vw-Math.min(r.width,vw)))+'px'; root.style.top=clamp(r.top,8,Math.max(8,vh-Math.min(r.height,vh)))+'px'; }
+  function setStatus(t){ ui.status.textContent=t; }
+  function toast(msg){ ui.toast.textContent=msg; ui.toast.classList.add('show'); setTimeout(()=>ui.toast.classList.remove('show'),900); }
+  function setKind(k){ state.kind=k; ui.kind.textContent=k.toUpperCase(); }
+  function pushHist(m){ state.history.unshift('['+new Date().toLocaleTimeString()+'] '+m); ui.hist.textContent=state.history.slice(0,200).join('\n'); }
+  function scrollIntoPanelView(el){ let p=el; while(p && p!==document && !p.classList?.contains('use-pb')) p=p.parentNode; if(p && p.classList && p.classList.contains('use-pb')){ try{ el.scrollIntoView({block:'nearest',inline:'nearest'}); }catch{} } }
+  document.addEventListener('focusin',e=>{ const t=e.target; if(!t) return; const tag=(t.tagName||'').toUpperCase(); if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT') scrollIntoPanelView(t); },true);
+
+  let fitOn=true; function applyFit(){ if(fitOn){ root.style.maxHeight='92vh'; root.style.maxWidth='96vw'; root.style.overflow='auto'; } else { root.style.maxHeight=''; root.style.maxWidth=''; root.style.overflow='visible'; } }
+  applyFit(); $('use-fit').onclick=()=>{ fitOn=!fitOn; applyFit(); setStatus(fitOn?'Fit enabled':'Fit disabled'); };
+  let zoom=1; $('use-zoom').onclick=()=>{ zoom = zoom>=1.5 ? 1 : (zoom+0.1); root.style.transform='scale('+zoom+')'; root.style.transformOrigin='top left'; root.scrollTop=0; };
+
+  // parsing
+  function isBase64Json(s){ try{ const d=atob((s||'').trim()); JSON.parse(d); return true; }catch{return false;} }
+  function detectFmt(v){ try{ JSON.parse(v); return 'json'; }catch{} if(isBase64Json(v)) return 'base64json'; return 'text'; }
+  function tryParse(input){ try{ return {kind:'json',data:JSON.parse(input),raw:input}; }catch{} if(isBase64Json(input)){ try{ return {kind:'json',data:JSON.parse(atob(input.trim())),raw:input}; }catch{} } return {kind:'text',data:null,raw:input}; }
+  const isIdx=k=>/^\d+$/.test(String(k));
+  function parsePath(p){ const out=[]; String(p||'').split('.').forEach(part=>{ const re=/([^\[\]]+)|\[(\d+)\]/g; let m; while((m=re.exec(part))){ out.push(m[1]??m[2]); } }); return out; }
+  function setByPath(obj,pathOrSegs,val){ const segs=Array.isArray(pathOrSegs)?pathOrSegs:parsePath(pathOrSegs); let o=obj; segs.forEach((k,i)=>{ if(i===segs.length-1){ o[k]=val; } else { if(o[k]==null||typeof o[k]!=='object') o[k]=isIdx(segs[i+1])?[]:{}; o=o[k]; } }); }
+  function getByPath(obj,path){ return parsePath(path).reduce((o,k)=>o==null?undefined:o[k],obj); }
+  function delByPath(obj,path){ const segs=parsePath(path); let o=obj; for(let i=0;i<segs.length-1;i++){ if(o==null) return false; o=o[segs[i]]; } if(o==null) return false; if(Array.isArray(o)&&isIdx(segs.at(-1))){ o.splice(+segs.at(-1),1); return true; } return delete o[segs.at(-1)]; }
+  const cast=s=>s==='null'?null:s==='true'?true:s==='false'?false:(s!==''&&!isNaN(+s)?+s:(()=>{try{return JSON.parse(s);}catch{return s;}})());
+  function safeRegexFromInput(text,isRegex,caseSensitive){
+    if(isRegex){ try{ return new RegExp(text, caseSensitive?'g':'gi'); }catch{ return null; } }
+    const esc=text.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    return new RegExp(esc, caseSensitive?'g':'gi');
+  }
+
+  // undo/redo
+  function commit(){ state._redo.length=0; state._undo.push({kind:state.kind,data:state.kind==='json'?JSON.stringify(state.data):(state.rawText||''),t:Date.now()}); if(state._undo.length>100)state._undo.shift(); }
+  function undo(){ if(!state._undo.length)return; const cur={kind:state.kind,data:state.kind==='json'?JSON.stringify(state.data):(state.rawText||'')}; state._redo.push(cur); const prev=state._undo.pop(); if(prev.kind==='json'){ setKind('json'); state.data=JSON.parse(prev.data); state.rawText=''; } else { setKind('text'); state.data=null; state.rawText=String(prev.data||''); } render(); }
+  function redo(){ if(!state._redo.length)return; const cur={kind:state.kind,data:state.kind==='json'?JSON.stringify(state.data):(state.rawText||'')}; state._undo.push(cur); const next=state._redo.pop(); if(next.kind==='json'){ setKind('json'); state.data=JSON.parse(next.data); state.rawText=''; } else { setKind('text'); state.data=null; state.rawText=String(next.data||''); } render(); }
+
+  // tabs
+  const tabbar=$('use-tabs'); const views=Array.from(root.querySelectorAll('.use-view'));
+  function updateStep(){ ui.step.textContent='Step '+(activeIdx+1)+'/'+TABS.length; }
+  function activate(tab){ activeIdx=Math.max(0, TABS.indexOf(tab)); tabbar.querySelectorAll('.use-tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===tab)); views.forEach(v=>v.classList.toggle('active',v.dataset.view===tab)); updateStep(); const view=views.find(v=>v.dataset.view===tab); if(view){ const sc=view.querySelector('.use-pb'); if(sc) sc.scrollTop=0; } root.scrollTop=0; }
+  tabbar.addEventListener('click',e=>{ const t=e.target.closest('.use-tab'); if(!t) return; activate(t.dataset.tab); });
+  $('use-next').onclick=()=>{ const ni=Math.min(TABS.length-1, activeIdx+1); activate(TABS[ni]); };
+  $('use-prev').onclick=()=>{ const pi=Math.max(0, activeIdx-1); activate(TABS[pi]); };
+
+  // ---------- Main render ----------
+  function render(){
+    if(state.kind==='json'){
+      ui.raw.value=JSON.stringify(state.data,null,2);
+      ui.rawText.value=state.rawText||'';
+      renderTreeEditor();
+      validateJSONLive();
+    } else if(state.kind==='text'){
+      ui.raw.value=''; ui.rawText.value=state.rawText||''; ui.tree.innerHTML='<div class="use-small">Raw text mode (no tree).</div>'; ui.jsonStatus.textContent='';
+    } else {
+      ui.raw.value=''; ui.rawText.value=''; ui.tree.innerHTML='<div class="use-small">No data.</div>'; ui.jsonStatus.textContent='';
+    }
+    persist();
+  }
+
+  // editor JSON tree (with copy-path buttons)
+  function renderTreeEditor(){
+    if(typeof state.data!=='object'||state.data===null){ ui.tree.innerHTML='<div class="use-small">Root not object/array.</div>'; return; }
+    const frag=document.createDocumentFragment();
+    const tOf=v=>v===null?'null':(Array.isArray(v)?'array':typeof v);
+    const entries=Array.isArray(state.data)?state.data.map((v,i)=>[i,v]):Object.entries(state.data);
+    const make=(k,v,p)=>{
+      const t=tOf(v),row=document.createElement('div');row.className='use-kv';
+      const ks=document.createElement('span');ks.className='use-k';ks.textContent=k; ks.title=p.join('.');
+      const pathBtn=document.createElement('button'); pathBtn.className='use-pathbtn'; pathBtn.textContent='Copy path'; pathBtn.onclick=()=>{ navigator.clipboard?.writeText(p.join('.')).catch(()=>{}); toast('Path copied'); };
+      const vw=document.createElement('span');vw.className='use-v';
+      if(t==='object'||t==='array'){
+        const det=document.createElement('details'); const s=document.createElement('summary'); s.textContent=t==='array'?('['+(Array.isArray(v)?v.length:0)+']'):'{…}'; det.appendChild(s);
+        const inner=document.createElement('div'); const es=t==='array'?(Array.isArray(v)?v.map((vv,i)=>[i,vv]):[]):Object.entries(v||{});
+        es.forEach(([kk,vv])=> inner.appendChild(make(String(kk),vv,p.concat([kk])))); det.appendChild(inner); vw.appendChild(det);
+      } else {
+        const inp=document.createElement('input'); inp.className='use-input'; inp.value=String(v); inp.title=p.join('.'); inp.spellcheck=false;
+        inp.addEventListener('focus',()=>scrollIntoPanelView(inp));
+        inp.addEventListener('change',()=>{ commit(); setByPath(state.data,p,cast(inp.value)); pushHist('Set '+p.join('.')+' = '+inp.value); postEdit(); ui.raw.value=JSON.stringify(state.data,null,2); validateJSONLive(); toast('Updated'); });
+        vw.appendChild(inp);
+      }
+      const tb=document.createElement('span');tb.className='use-badge';tb.textContent=t;
+      row.append(ks,vw,tb,pathBtn); return row;
+    };
+    entries.forEach(([k,v])=>frag.appendChild(make(String(k),v,[k])));
+    ui.tree.innerHTML=''; ui.tree.appendChild(frag);
+  }
+
+  function validateJSONLive(){ try{ JSON.parse(ui.raw.value); ui.jsonStatus.textContent='✓ valid JSON'; ui.jsonStatus.style.color='#8ff0a4'; } catch(e){ ui.jsonStatus.textContent='✗ '+(e.message||'invalid'); ui.jsonStatus.style.color='#ff9aa2'; } }
+
+  // snapshots
+  function makeSnap(label='snap'){ const id=++state.snapId; const rec={id,when:new Date().toISOString(),label,kind:state.kind,payload:state.kind==='json'?JSON.stringify(state.data):(state.rawText||'')}; state.snaps.unshift(rec); saveSnaps(); renderSnaps(); return rec; }
+  function renderSnaps(){ const opts=state.snaps.map(s=>'<option value="'+s.id+'">#'+s.id+' · '+s.label+' · '+new Date(s.when).toLocaleString()+'</option>').join(''); $('use-snap-sel').innerHTML=opts; $('use-diff-a').innerHTML=opts; $('use-diff-b').innerHTML=opts; }
+  function loadSnaps(){ try{ const raw=localStorage.getItem(SNAPS_NS); state.snaps=raw?JSON.parse(raw):[]; state.snapId=state.snaps.reduce((m,s)=>Math.max(m,(s.id||0)),0); }catch{ state.snaps=[]; state.snapId=0; } renderSnaps(); }
+  function saveSnaps(){ try{ localStorage.setItem(SNAPS_NS, JSON.stringify(state.snaps)); }catch{} }
+
+  // persist editor session
+  function persist(){ try{ const sess={k:state.kind,d:state.kind==='json'?JSON.stringify(state.data):(state.rawText||'')}; localStorage.setItem(SESS_NS+'_SESS', JSON.stringify(sess)); }catch{} }
+  function restore(){ try{ const raw=localStorage.getItem(SESS_NS+'_SESS'); if(!raw)return; const s=JSON.parse(raw); if(s.k==='json'){ setKind('json'); state.data=JSON.parse(s.d||'null'); state.rawText=''; } else if(s.k==='text'){ setKind('text'); state.data=null; state.rawText=String(s.d||''); } setStatus('Session restored'); render(); }catch{} }
+
+  // ---------- Sources ----------
+  function loadFromText(t){ commit(); const res=tryParse(t); if(res.kind==='json'){ setKind('json'); state.data=res.data; state.rawText=''; setStatus('Loaded JSON'+(state.filename?(' ('+state.filename+')'):'')); pushHist('Loaded JSON'); } else { setKind('text'); state.data=null; state.rawText=res.raw; setStatus('Loaded as text'); pushHist('Loaded text'); } render(); }
+  $('use-load-file').onclick=async()=>{ const f=$('use-file').files?.[0]; if(!f){ setStatus('No file'); return; } const t=await f.text(); state.filename=f.name; loadFromText(t); };
+  $('use-fetch').onclick=async()=>{ const u=$('use-url').value.trim(); if(!u) return; try{ setStatus('Fetching…'); const r=await fetch(u); const t=await r.text(); state.filename=u.split('/').pop()||'remote'; loadFromText(t); }catch(e){ setStatus('Fetch failed'); alert(e.message||e); } };
+  $('use-parse').onclick=()=>loadFromText($('use-paste').value);
+  $('use-as-text').onclick=()=>{ commit(); setKind('text'); state.data=null; state.rawText=$('use-paste').value; setStatus('Loaded as text'); render(); };
+
+  // ---------- Editor ops ----------
+  function searchAll(q){ if(state.kind!=='json') return []; let rx; try{ rx=new RegExp(q,'i'); }catch{ rx=new RegExp(String(q).replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&'),'i'); } const hits=[]; (function walk(v,p){ if(v&&typeof v==='object'){ if(Array.isArray(v)){ v.forEach((vv,i)=>walk(v,p.concat([i])));} else { for(const k in v){ walk(v[k],p.concat([k])); if(String(k).match(rx)) hits.push({path:p.concat([k]).join('.'),where:'key'}); } } } else { if(String(v).match(rx)) hits.push({path:p.join('.'),where:'value'});} })(state.data,[]); return hits; }
+  $('use-search').onclick=()=>{ const q=$('use-q').value.trim(); if(!q||state.kind!=='json'){ ui.searchOut.textContent='No results.'; return; } const hits=searchAll(q); ui.searchOut.textContent=hits.length?hits.map(h=>(h.where.padEnd(5)+'  '+h.path)).join('\n'):'No results.'; };
+  $('use-replace').onclick=()=>{ if(state.kind!=='json')return; const q=prompt('Find (regex ok):',''); if(q==null)return; const r=prompt('Replace with:',''); if(r==null)return; commit(); const hits=searchAll(q); const rx=new RegExp(q,'ig'); hits.forEach(h=>{ if(h.where==='key'){ const segs=parsePath(h.path); const last=segs.pop(); let obj=state.data; segs.forEach(s=>obj=obj[s]); const nk=String(last).replace(rx,r); obj[nk]=obj[last]; if(nk!==last) delete obj[last]; } else { const val=getByPath(state.data,h.path); if(typeof val==='string') setByPath(state.data,h.path,val.replace(rx,r)); } }); pushHist('Replaced '+hits.length); postEdit(); render(); toast('Replaced '+hits.length); };
+
+  // Jump to path
+  $('use-jump-go').onclick=()=>{ const p=ui.jump.value.trim(); if(!p) return; const v=state.kind==='json'?getByPath(state.data,p):undefined; if(typeof v==='undefined'){ setStatus('Path not found'); return; } // scroll tree to first matching input (best-effort)
+    const inputs = ui.tree.querySelectorAll('input.use-input');
+    for(const inp of inputs){ if(inp.title===p){ inp.focus(); inp.scrollIntoView({block:'center'}); return; } }
+    setStatus('Found, expand nodes manually'); };
+
+  function coerceNumbers(o){ (function w(x){ if(!x||typeof x!=='object')return; if(Array.isArray(x)){ for(let i=0;i<x.length;i++){ if(typeof x[i]==='string' && x[i].trim()!=='' && !isNaN(+x[i])) x[i]=+x[i]; else if(x[i]&&typeof x[i]==='object') w(x[i]); } } else { for(const k in x){ const v=x[k]; if(typeof v==='string' && v.trim()!=='' && !isNaN(+v)) x[k]=+v; else if(v&&typeof v==='object') w(v); } } })(o); }
+  function clampNumbers(o,mi,ma){ (function w(x){ if(!x||typeof x!=='object')return; if(Array.isArray(x)){ for(let i=0;i<x.length;i++){ if(typeof x[i]==='number') x[i]=Math.max(mi,Math.min(ma,x[i])); else if(x[i]&&typeof x[i]==='object') w(x[i]); } } else { for(const k in x){ const v=x[k]; if(typeof v==='number') x[k]=Math.max(mi,Math.min(ma,v)); else if(v&&typeof v==='object') w(v); } } })(o); }
+  $('use-coerce').onclick=()=>{ if(state.kind!=='json')return; commit(); coerceNumbers(state.data); pushHist('Coerced numbers'); postEdit(); render(); toast('Coerced'); };
+  $('use-clamp').onclick=()=>{ if(state.kind!=='json')return; const mi=+($('use-cmin').value), ma=+($('use-cmax').value); if(!isFinite(mi)||!isFinite(ma)){ setStatus('Invalid min/max'); return; } commit(); clampNumbers(state.data,mi,ma); pushHist('Clamped ['+mi+','+ma+']'); postEdit(); render(); toast('Clamped'); };
+  $('use-apply-raw').onclick=()=>{ try{ const j=JSON.parse(ui.raw.value); commit(); setKind('json'); state.data=j; state.rawText=''; setStatus('Applied JSON'); postEdit(true); render(); }catch(e){ setStatus('Invalid JSON'); alert(e.message||e); } };
+  $('use-pretty').onclick=()=>{ try{ const obj=JSON.parse(ui.raw.value); ui.raw.value=JSON.stringify(obj,null,2); validateJSONLive(); }catch(e){ toast('Not valid JSON'); } };
+  $('use-apply-text').onclick=()=>{ commit(); setKind('text'); state.data=null; state.rawText=ui.rawText.value; setStatus('Applied text'); postEdit(true); render(); };
+
+  // ---------- Replace All engine ----------
+  function walkObject(obj, fnKV, path=[]){
+    if(obj && typeof obj==='object'){
+      if(Array.isArray(obj)){
+        for(let i=0;i<obj.length;i++) walkObject(obj[i], fnKV, path.concat([i]));
+      } else {
+        for(const k of Object.keys(obj)){
+          const v=obj[k];
+          fnKV({obj, key:k, value:v, path});
+          walkObject(v, fnKV, path.concat([k]));
+        }
+      }
+    }
+  }
+  function replaceAllInObject(obj, rx, repl, scope){ // returns {keyCount, valCount}
+    let keyCount=0, valCount=0;
+    walkObject(obj, ({obj,key,value,path})=>{
+      if(scope!=='values' && rx.test(key)){
+        const newKey = String(key).replace(rx, repl);
+        if(newKey!==key){
+          obj[newKey]=value; delete obj[key];
+          keyCount++;
+        }
+      }
+      if(scope!=='keys' && (typeof value==='string') && rx.test(value)){
+        obj[(scope==='values'||scope==='both') && obj.hasOwnProperty(key)?(key):key] = String(value).replace(rx, repl);
+        valCount++;
+      }
+    });
+    return {keyCount, valCount};
+  }
+  function previewReplaceInObject(obj, rx, scope){
+    let keyHits=0, valHits=0;
+    walkObject(obj, ({key,value})=>{
+      if(scope!=='values' && rx.test(key)) keyHits++;
+      if(scope!=='keys' && typeof value==='string' && rx.test(value)) valHits++;
+    });
+    return {keyHits, valHits};
+  }
+
+  // Editor Replace All
+  ui.rPrev.onclick=()=>{ if(state.kind!=='json'){ ui.rCount.textContent='—'; ui.rLog.textContent='Load JSON first.'; return; }
+    const rx = safeRegexFromInput(ui.rFind.value, ui.rRegex.checked, ui.rCase.checked);
+    if(!rx){ ui.rLog.textContent='Invalid regex.'; return; }
+    const {keyHits,valHits}=previewReplaceInObject(structuredClone(state.data), new RegExp(rx.source, rx.flags.replace('g','')+'g'), ui.rScope.value);
+    ui.rCount.textContent=`keys:${keyHits} values:${valHits}`;
+    ui.rLog.textContent=`Preview → will affect ${keyHits} key(s) and ${valHits} value(s).`;
+  };
+  ui.rRun.onclick=()=>{ if(state.kind!=='json'){ ui.rLog.textContent='Load JSON first.'; return; }
+    const rx = safeRegexFromInput(ui.rFind.value, ui.rRegex.checked, ui.rCase.checked);
+    if(!rx){ ui.rLog.textContent='Invalid regex.'; return; }
+    commit();
+    const res=replaceAllInObject(state.data, new RegExp(rx.source, rx.flags.replace('g','')+'g'), ui.rRepl.value, ui.rScope.value);
+    pushHist(`ReplaceAll editor keys:${res.keyCount} values:${res.valCount}`);
+    postEdit(); render(); toast('Replace All done');
+    ui.rLog.textContent=`Done. Renamed keys:${res.keyCount}, replaced values:${res.valCount}`;
+  };
+
+  // ---------- Storage ----------
+  function storeObj(){ return ui.stoWhich.value==='session'?sessionStorage:localStorage; }
+  function updateDetectedBadge(){ const S=storeObj(); const k=ui.stoKey.value.trim(); const v=k?S.getItem(k):null; ui.det.textContent='detected: '+(v==null?'—':detectFmt(v)); }
+
+  function renderStoList(){
+    const S=storeObj(); const filter=ui.stoFilter.value.trim();
+    let rx=null; if(filter){ try{ rx=new RegExp(filter,'i'); }catch{ rx=new RegExp(filter.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&'),'i'); } }
+    ui.stoList.innerHTML='';
+    const items=[];
+    for(let i=0;i<S.length;i++){
+      const k=S.key(i); if(rx && !rx.test(k)) continue;
+      const v=S.getItem(k)||''; const hint=detectFmt(v).toUpperCase(); items.push({k,hint,len:v.length});
+    }
+    if(!items.length){ ui.stoList.innerHTML='<div class="use-small">No keys.</div>'; return; }
+    items.sort((a,b)=>a.k.localeCompare(b.k));
+    items.forEach(({k,hint,len})=>{
+      const row=document.createElement('div'); row.className='use-row-tight';
+      const pill=document.createElement('div'); pill.className='use-pill'; pill.innerHTML='<b style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+k+'</b><span class="use-small">['+hint+'] len='+len+'</span>';
+      const loadBtn=document.createElement('button'); loadBtn.className='use-btn'; loadBtn.textContent='Load';
+      const editBtn=document.createElement('button'); editBtn.className='use-btn'; editBtn.textContent='Edit';
+      const delBtn=document.createElement('button'); delBtn.className='use-btn danger'; delBtn.textContent='Delete';
+      loadBtn.onclick=()=>{ ui.stoKey.value=k; $('use-sto-load').click(); activate('storage'); updateDetectedBadge(); };
+      editBtn.onclick=()=>{ ui.stoKey.value=k; ui.stoFmt.value='auto'; loadStorageKeyForEditing(k); activate('storage'); updateDetectedBadge(); };
+      delBtn.onclick=()=>{ if(!confirm('Delete key "'+k+'"?'))return; S.removeItem(k); renderStoList(); setStatus('Deleted "'+k+'"'); };
+      row.append(pill, loadBtn, editBtn, delBtn);
+      ui.stoList.appendChild(row);
+    });
+  }
+  $('use-sto-scan').onclick=renderStoList;
+  ui.stoWhich.onchange=()=>{ renderStoList(); updateDetectedBadge(); };
+  ui.stoFilter.oninput=()=>{ renderStoList(); };
+
+  function renderStorageJsonTree(){
+    const container = ui.stoJSONTree, obj=state.stoParsed;
+    if(!obj || typeof obj!=='object'){ container.innerHTML='<div class="use-small">Not an object/array.</div>'; return; }
+    const frag=document.createDocumentFragment();
+    const tOf=v=>v===null?'null':(Array.isArray(v)?'array':typeof v);
+    const entries=Array.isArray(obj)?obj.map((v,i)=>[i,v]):Object.entries(obj);
+    const make=(k,v,p)=>{
+      const t=tOf(v),row=document.createElement('div');row.className='use-kv';
+      const ks=document.createElement('span');ks.className='use-k';ks.textContent=k; ks.title=p.join('.');
+      const pathBtn=document.createElement('button'); pathBtn.className='use-pathbtn'; pathBtn.textContent='Copy path'; pathBtn.onclick=()=>{ navigator.clipboard?.writeText(p.join('.')).catch(()=>{}); toast('Path copied'); };
+      const vw=document.createElement('span');vw.className='use-v';
+      if(t==='object'||t==='array'){
+        const det=document.createElement('details'); const s=document.createElement('summary'); s.textContent=t==='array'?('['+(Array.isArray(v)?v.length:0)+']'):'{…}'; det.appendChild(s);
+        const inner=document.createElement('div'); const es=t==='array'?(Array.isArray(v)?v.map((vv,i)=>[i,vv]):[]):Object.entries(v||{});
+        es.forEach(([kk,vv])=> inner.appendChild(make(String(kk),vv,p.concat([kk])))); det.appendChild(inner); vw.appendChild(det);
+      } else {
+        const inp=document.createElement('input'); inp.className='use-input'; inp.value=String(v); inp.title=p.join('.'); inp.spellcheck=false;
+        inp.addEventListener('focus',()=>scrollIntoPanelView(inp));
+        inp.addEventListener('change',()=>{ setByPath(obj,p,cast(inp.value)); ui.stoJSONRaw.value=JSON.stringify(obj,null,2); ui.stoJSONStatus.textContent='✓ modified (not yet saved)'; toast('Edited'); });
+        vw.appendChild(inp);
+      }
+      const tb=document.createElement('span');tb.className='use-badge';tb.textContent=t;
+      row.append(ks,vw,tb,pathBtn); return row;
+    };
+    entries.forEach(([k,v])=>frag.appendChild(make(String(k),v,[k])));
+    container.innerHTML=''; container.appendChild(frag);
+  }
+
+  function loadStorageKeyForEditing(k){
+    const S=storeObj(); const raw=S.getItem(k); if(raw==null){ alert('Key not found'); return false; }
+    const fmt = ui.stoFmt.value==='auto' ? detectFmt(raw) : ui.stoFmt.value;
+    if(fmt==='json' || fmt==='base64json'){
+      try{
+        state.stoParsed = (fmt==='json') ? JSON.parse(raw) : JSON.parse(atob(raw));
+      }catch(e){
+        ui.stoJSONWrap.style.display='none'; ui.stoTextWrap.style.display='block'; ui.stoVal.value = raw; ui.stoJSONStatus.textContent='—'; return true;
+      }
+      ui.stoJSONRaw.value = JSON.stringify(state.stoParsed, null, 2);
+      ui.stoJSONStatus.textContent = '✓ parsed as '+fmt;
+      ui.stoJSONWrap.style.display='grid'; ui.stoTextWrap.style.display='none';
+      renderStorageJsonTree();
+    } else {
+      ui.stoJSONWrap.style.display='none'; ui.stoTextWrap.style.display='block'; ui.stoVal.value = raw; ui.stoJSONStatus.textContent='—';
+    }
+    return true;
+  }
+
+  $('use-sto-load').onclick=()=>{ const k=ui.stoKey.value.trim(); if(!k) return; const S=storeObj(); const v=S.getItem(k); if(v==null){ alert('Key not found'); return; }
+    ui.stoVal.value = (ui.stoFmt.value==='auto') ? (detectFmt(v)==='json' ? JSON.stringify(JSON.parse(v),null,2) : detectFmt(v)==='base64json' ? JSON.stringify(JSON.parse(atob(v)),null,2) : v) :
+      (ui.stoFmt.value==='json'?JSON.stringify(JSON.parse(v),null,2):ui.stoFmt.value==='base64json'?JSON.stringify(JSON.parse(atob(v)),null,2):v);
+    setStatus('Loaded key "'+k+'"'); updateDetectedBadge(); loadStorageKeyForEditing(k);
+  };
+
+  $('use-sto-save').onclick=()=>{ const k=ui.stoKey.value.trim(); if(!k) return; const S=storeObj(); const usingJSON = ui.stoJSONWrap.style.display !== 'none'; const chosenFmt = (ui.stoFmt.value==='auto') ? 'text' : ui.stoFmt.value;
+    try{
+      let payload;
+      if(usingJSON){ const obj=JSON.parse(ui.stoJSONRaw.value);
+        if(chosenFmt==='json') payload=JSON.stringify(obj);
+        else if(chosenFmt==='base64json') payload=btoa(JSON.stringify(obj));
+        else payload = ui.stoJSONRaw.value;
+      } else {
+        if(chosenFmt==='json'){ const obj=JSON.parse(ui.stoVal.value); payload=JSON.stringify(obj); }
+        else if(chosenFmt==='base64json'){ const obj=JSON.parse(ui.stoVal.value); payload=btoa(JSON.stringify(obj)); }
+        else payload = ui.stoVal.value;
+      }
+      S.setItem(k, payload); setStatus('Saved key "'+k+'"'); renderStoList(); toast('Saved'); if (state.writeback.autoRefresh) refreshGame();
+    }catch(e){ alert('Save failed: '+(e.message||e)); }
+  };
+
+  $('use-sto-del').onclick=()=>{ const k=ui.stoKey.value.trim(); if(!k) return; const S=storeObj(); if(!confirm('Delete key "'+k+'"?'))return; S.removeItem(k); ui.stoVal.value=''; ui.stoJSONRaw.value=''; ui.stoJSONWrap.style.display='none'; ui.stoTextWrap.style.display='block'; renderStoList(); setStatus('Deleted "'+k+'"'); };
+
+  $('use-sto-to-editor-json').onclick=()=>{ try{ const txt = (ui.stoJSONWrap.style.display!=='none') ? ui.stoJSONRaw.value : ui.stoVal.value; const obj=JSON.parse(txt); commit(); setKind('json'); state.data=obj; state.rawText=''; render(); activate('editor'); }catch(e){ alert('Not valid JSON.'); } };
+  $('use-sto-to-editor-text').onclick=()=>{ const txt = (ui.stoJSONWrap.style.display!=='none') ? ui.stoJSONRaw.value : ui.stoVal.value; commit(); setKind('text'); state.data=null; state.rawText=txt; render(); activate('editor'); };
+
+  // Storage Replace All
+  ui.srPrev.onclick=()=>{ if(!state.stoParsed){ ui.srLog.textContent='Load a JSON storage key first.'; return; }
+    const rx = safeRegexFromInput(ui.srFind.value, ui.srRegex.checked, ui.srCase.checked); if(!rx){ ui.srLog.textContent='Invalid regex.'; return; }
+    const {keyHits,valHits}=previewReplaceInObject(structuredClone(state.stoParsed), new RegExp(rx.source, rx.flags.replace('g','')+'g'), ui.srScope.value);
+    ui.srCount.textContent=`keys:${keyHits} values:${valHits}`;
+    ui.srLog.textContent=`Preview → will affect ${keyHits} key(s) and ${valHits} value(s).`;
+  };
+  ui.srRun.onclick=()=>{ if(!state.stoParsed){ ui.srLog.textContent='Load a JSON storage key first.'; return; }
+    const rx = safeRegexFromInput(ui.srFind.value, ui.srRegex.checked, ui.srCase.checked); if(!rx){ ui.srLog.textContent='Invalid regex.'; return; }
+    const res=replaceAllInObject(state.stoParsed, new RegExp(rx.source, rx.flags.replace('g','')+'g'), ui.srRepl.value, ui.srScope.value);
+    ui.stoJSONRaw.value = JSON.stringify(state.stoParsed, null, 2);
+    ui.stoJSONStatus.textContent='✓ modified (not yet saved)';
+    renderStorageJsonTree();
+    toast('Storage Replace All done');
+    ui.srLog.textContent=`Done. Renamed keys:${res.keyCount}, replaced values:${res.valCount}`;
+  };
+
+  // Apply JSON to storage immediately
+  $('use-sto-json-apply').onclick=()=>{ const k=ui.stoKey.value.trim(); if(!k) return; const S=storeObj(); const fmt = (ui.stoFmt.value==='auto') ? 'json' : ui.stoFmt.value;
+    try{
+      const obj = JSON.parse(ui.stoJSONRaw.value);
+      const payload = (fmt==='base64json') ? btoa(JSON.stringify(obj)) : (fmt==='json' ? JSON.stringify(obj) : ui.stoJSONRaw.value);
+      S.setItem(k, payload);
+      ui.stoJSONStatus.textContent='✓ saved';
+      setStatus('Saved key "'+k+'"'); renderStoList(); toast('Saved');
+      if (state.writeback.autoRefresh) refreshGame();
+    }catch(e){ alert('Invalid JSON: '+(e.message||e)); }
+  };
+
+  // ---------- Export / Write-back ----------
+  try{ const savedWB=JSON.parse(localStorage.getItem(WB_NS)||'null'); if(savedWB) Object.assign(state.writeback,savedWB); }catch{}
+  const wbApply=(prop,val)=>{ state.writeback[prop]=val; try{ localStorage.setItem(WB_NS, JSON.stringify(state.writeback)); }catch{} };
+  const wbStore=$('use-wb-store'); wbStore.value=state.writeback.store; wbStore.onchange=e=>wbApply('store',e.target.value);
+  const wbKey=$('use-wb-key'); wbKey.value=state.writeback.key; wbKey.oninput=e=>wbApply('key',e.target.value.trim());
+  const wbFmt=$('use-wb-fmt'); wbFmt.value=state.writeback.fmt; wbFmt.onchange=e=>wbApply('fmt',e.target.value);
+  const wbAuto=$('use-wb-auto'); wbAuto.checked=!!state.writeback.auto; wbAuto.onchange=e=>wbApply('auto',!!e.target.checked);
+  const wbAutoref=$('use-wb-autoref'); wbAutoref.checked=!!state.writeback.autoRefresh; wbAutoref.onchange=e=>wbApply('autoRefresh',!!e.target.checked);
+  const wbIframe=$('use-iframe'); wbIframe.value=state.writeback.iframeSel||''; wbIframe.oninput=e=>wbApply('iframeSel',e.target.value.trim());
+
+  function dataForWrite(){
+    if(state.writeback.fmt==='text') return state.kind==='text'?(state.rawText||''):JSON.stringify(state.data);
+    const jsonStr=state.kind==='json'?JSON.stringify(state.data):(state.rawText||'');
+    if(state.writeback.fmt==='json') return jsonStr;
+    if(state.writeback.fmt==='base64json') return btoa(jsonStr);
+    return jsonStr;
+  }
+  function getStore(){ return state.writeback.store==='session'?sessionStorage:localStorage; }
+  function refreshGame(){
+    const sel=state.writeback.iframeSel; let ifr=sel?document.querySelector(sel):null;
+    if(!ifr){
+      const frames=Array.from(document.querySelectorAll('iframe')).filter(f=>{const r=f.getBoundingClientRect();return r.width*r.height>0;});
+      ifr=frames.sort((a,b)=>(b.getBoundingClientRect().width*b.getBoundingClientRect().height)-(a.getBoundingClientRect().width*a.getBoundingClientRect().height))[0]||null;
+    }
+    if(ifr){
+      try{ if(ifr.contentWindow){ ifr.contentWindow.location.reload(); setStatus('Iframe refreshed'); toast('Iframe refreshed'); return; } }catch(_){}
+      try{ const src=ifr.getAttribute('src'); if(src){ ifr.setAttribute('src',src); setStatus('Iframe src reset'); toast('Iframe reset'); return; } }catch(_){}
+    }
+    location.reload();
+  }
+  function saveToTarget(forceRefresh=false){
+    const key=state.writeback.key; if(!key) return false;
+    try{
+      const payload=dataForWrite(); getStore().setItem(key,payload);
+      pushHist('Write-back → '+state.writeback.store+'Storage["'+key+'"] ('+state.writeback.fmt+')'); toast('Saved');
+      if (forceRefresh || state.writeback.autoRefresh) refreshGame();
+      return true;
+    }catch(e){ pushHist('Write-back failed: '+e.message); return false; }
+  }
+  $('use-save-now').onclick=()=>{ const ok=saveToTarget(false); setStatus(ok?'Saved':'No key / nothing to save'); };
+  $('use-save-refresh').onclick=()=>{ const ok=saveToTarget(true); if(ok) setStatus('Saved & refreshed'); };
+  $('use-load-from-key').onclick=()=>{ const key=state.writeback.key||prompt('Storage key to load:',''); if(!key) return; if(!loadFromStorageKey(key,state.writeback.store)) setStatus('Key not found'); };
+
+  function postEdit(){ if(!state.writeback.auto) return; const ok=saveToTarget(false); if(ok) setStatus('Auto-saved'); }
+
+  // ---------- File export ----------
+  $('use-download').onclick=()=>{ const name=$('use-out-name').value.trim()||(state.filename||'save.json'); const fmt=$('use-out-fmt').value; let blob;
+    if(fmt==='json'){ if(state.kind!=='json'){ setStatus('Not JSON'); return; } blob=new Blob([JSON.stringify(state.data,null,2)],{type:'application/json'}); }
+    else if(fmt==='json-min'){ if(state.kind!=='json'){ setStatus('Not JSON'); return; } blob=new Blob([JSON.stringify(state.data)],{type:'application/json'}); }
+    else { const t=state.kind==='json'?JSON.stringify(state.data):(state.rawText||''); blob=new Blob([t],{type:'text/plain'}); }
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); setStatus('Downloaded'); toast('Downloaded'); };
+
+  // ---------- Load-from-storage helper ----------
+  function loadFromStorageKey(key,store='local'){
+    try{
+      const src=(store==='session')?sessionStorage:localStorage; const v=src.getItem(key); if(v==null) return false;
+      state.filename=key; const parsed=tryParse(v);
+      if(parsed.kind==='json'){ setKind('json'); state.data=parsed.data; state.rawText=''; } else { setKind('text'); state.data=null; state.rawText=parsed.raw; }
+      setStatus('Loaded from '+store+'Storage["'+key+'"]'); render(); return true;
+    }catch(e){ setStatus('Load error'); alert(e.message||e); return false; }
+  }
+
+  // ---------- Shortcuts ----------
+  document.addEventListener('keydown',e=>{ if(!root.isConnected)return;
+    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){ e.preventDefault(); makeSnap('hotkey'); setStatus('Snapshot saved'); toast('Snapshot'); }
+    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f'){ e.preventDefault(); $('use-q').focus(); $('use-q').select(); activate('editor'); }
+    if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){ e.preventDefault(); const ok=saveToTarget(false); if(ok)setStatus('Saved'); }
+    if(e.key==='Escape'){ e.preventDefault(); root.remove(); if(window.__USE) delete window.__USE; }
+  });
+
+  // ---------- Move/Resize ----------
+  const dragBar=$('use-drag'); let dragging=false,dragOff=[0,0],minimized=false;
+  dragBar.addEventListener('mousedown',e=>{ if(e.target.closest('button')) return; dragging=true; const r=root.getBoundingClientRect(); dragOff=[e.clientX-r.left,e.clientY-r.top]; e.preventDefault(); });
+  dragBar.addEventListener('dblclick',()=>setMin(!minimized));
+  window.addEventListener('mousemove',e=>{ if(!dragging)return; const r=root.getBoundingClientRect(); let x=e.clientX-dragOff[0], y=e.clientY-dragOff[1]; x=clamp(x,8,window.innerWidth-Math.min(r.width,window.innerWidth)); y=clamp(y,8,window.innerHeight-Math.min(r.height,window.innerHeight)); root.style.left=x+'px'; root.style.top=y+'px'; });
+  window.addEventListener('mouseup',()=>{ if(dragging){ dragging=false; clampIntoViewport(); saveWin(); } });
+  function setMin(v){ minimized=!!v; if(minimized){ root.style.left=''; root.style.top=''; root.style.right='16px'; root.style.bottom='16px'; root.style.width='560px'; root.style.height='460px'; } else { const w=JSON.parse(localStorage.getItem(WIN_NS)||'{}'); root.style.right=''; root.style.bottom=''; if(w.left)root.style.left=w.left; if(w.top)root.style.top=w.top; if(w.width)root.style.width=w.width; if(w.height)root.style.height=w.height; clampIntoViewport(); } saveWin(); }
+  function startResize(which,e){ e.preventDefault(); const r0=root.getBoundingClientRect(); const p0={x:e.clientX,y:e.clientY};
+    function mm(ev){
+      if(which==='e'||which==='se'){ const dx=ev.clientX-p0.x; root.style.width=Math.max(640, r0.width+dx)+'px'; }
+      if(which==='s'||which==='se'){ const dy=ev.clientY-p0.y; root.style.height=Math.max(420, r0.height+dy)+'px'; }
+      root.style.maxHeight='92vh'; root.style.overflow='auto'; clampIntoViewport();
+    }
+    function mu(){ window.removeEventListener('mousemove',mm); window.removeEventListener('mouseup',mu); clampIntoViewport(); saveWin(); }
+    window.addEventListener('mousemove',mm); window.addEventListener('mouseup',mu);
+  }
+  $('use-rz-e').addEventListener('mousedown',e=>startResize('e',e));
+  $('use-rz-s').addEventListener('mousedown',e=>startResize('s',e));
+  $('use-rz-se').addEventListener('mousedown',e=>startResize('se',e));
+  window.addEventListener('resize',clampIntoViewport);
+
+  // ---------- History buttons ----------
+  $('use-snap').onclick=()=>{ const s=makeSnap(prompt('Snapshot label:','manual')||'manual'); setStatus('Snapshot #'+s.id); toast('Snapshot #'+s.id); };
+  $('use-revert').onclick=()=>{ const id=+($('use-snap-sel').value); const s=state.snaps.find(x=>x.id===id); if(!s)return; commit(); if(s.kind==='json'){ setKind('json'); state.data=JSON.parse(s.payload); state.rawText=''; } else { setKind('text'); state.data=null; state.rawText=s.payload||''; } pushHist('Reverted to #'+id); postEdit(); render(); toast('Reverted'); };
+  function diffJSON(a,b){ try{ const A=JSON.stringify(a,null,2).split('\n'), B=JSON.stringify(b,null,2).split('\n'); const out=[]; let i=0,j=0; while(i<A.length||j<B.length){ if(A[i]===B[j]){ out.push('  '+A[i]); i++; j++; } else if (B.slice(j+1).includes(A[i])){ out.push('+ '+B[j]); j++; } else { out.push('- '+A[i]); i++; } } return out.join('\n'); }catch(e){ return 'Diff error: '+e.message; } }
+  $('use-diff').onclick=()=>{ const A=+($('use-diff-a').value), B=+($('use-diff-b').value); const a=state.snaps.find(x=>x.id===A), b=state.snaps.find(x=>x.id===B); if(!a||!b){ ui.diffOut.textContent='Pick two snapshots.'; return; } if(a.kind!=='json'||b.kind!=='json'){ ui.diffOut.textContent='Diff only supports JSON.'; return; } ui.diffOut.textContent=diffJSON(JSON.parse(a.payload), JSON.parse(b.payload)); };
+
+  // ---------- Init ----------
+  loadSnaps(); restore(); setStatus('Ready'); clampIntoViewport();
+
+  // ---------- Public API ----------
+  function __saveAPI(key,{store='local',fmt='json',iframeSel=null}={}){
+    if(!key) throw new Error('Missing key');
+    const prev = {store:state.writeback.store, key:state.writeback.key, fmt:state.writeback.fmt};
+    state.writeback.store=store; state.writeback.key=key; state.writeback.fmt=fmt;
+    const ok = saveToTarget(false);
+    state.writeback.store=prev.store; state.writeback.key=prev.key; state.writeback.fmt=prev.fmt;
+    if(ok){ if(iframeSel!==null) state.writeback.iframeSel=iframeSel; refreshGame(); }
+    return ok;
+  }
+  window.__USE={
+    version:'1.4.0-replace-all',
+    get state(){return state;},
+    setJson(obj){commit();setKind('json');state.data=obj;state.rawText='';postEdit();render();},
+    setText(str){commit();setKind('text');state.data=null;state.rawText=String(str||'');postEdit();render();},
+    loadFromStorageKey:(k,store='local')=>loadFromStorageKey(k,store),
+    loadFromLocalStorageKey:(k)=>loadFromStorageKey(k,'local'),
+    save: __saveAPI,
+    destroy(){ try{ root.remove(); }catch{} }
+  };
+})();
